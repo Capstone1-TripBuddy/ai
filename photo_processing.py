@@ -8,36 +8,16 @@ from sklearn.cluster import DBSCAN
 import random
 from pydantic import BaseModel
 
-class FaceData(BaseModel):
-    i: int
-    x: int
-    y: int
-    w: int
-    h: int
-    label: str
-    embeddingId: int
-    def __init__(self, i, x, y, w, h, l, e):
-        super().__init__(i=i, x=x, y=y, w=w, h=h, label=l, embeddingId=e)
-    def __init__(self, l: list):
-        super().__init__(i=l[0], x=l[1], y=l[2], w=l[3], h=l[4], label=l[5], embeddingId=l[6])
-
 class PhotoFaceData(BaseModel):
     x: int
     y: int
     w: int
     h: int
-    label: str
-    embeddingId: int
+    label: str | None
     def __init__(self, x, y, w, h, l, e):
-        super().__init__(x=x, y=y, w=w, h=h, label=l, embeddingId=e)
+        super().__init__(x=x, y=y, w=w, h=h, label=l)
     def __init__(self, l: list):
-        super().__init__(x=l[1], y=l[2], w=l[3], h=l[4], label=l[5], embeddingId=l[6])
-
-class PhotoData(BaseModel):
-    category: str
-    faces: list[PhotoFaceData]
-    def __init__(self, category, faces):
-        super().__init__(category=category, faces=faces)
+        super().__init__(x=l[1], y=l[2], w=l[3], h=l[4], label=l[5])
 
 def max_without_str(lst):
     non_str_elements = []
@@ -59,19 +39,31 @@ detector = MTCNN()
 embedder = FaceNet()
 dbscan = DBSCAN(metric='cosine', eps=0.2, min_samples=1)
 
-def get_new_faces(embeddings_bytes_old: list[bytes], labels_old: list[str], photos_path_new: list[str]) -> list[list]:
+def get_new_faces(profile_image_paths: list[str], labels_old: list[str], photos_path_new: list[str], create_labels: bool = True) -> list[list]:
 
     embeddings_old = []
     embeddings_new = []
     face_locations_new = []
 
-    for embedding_bytes_old in embeddings_bytes_old:
-        embeddings_old.append(np.frombuffer(embedding_bytes_old, np.float32))
+    # 각 이미지에서 얼굴 탐지 및 임베딩 생성
+    for idx, photo_path in enumerate(profile_image_paths):
+        image = cv2.imread(photo_path)
+
+        if image is None:
+            raise ValueError(f"Failed to read image from path: {photo_path}")
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        detections = detector.detect_faces(image_rgb)
+        x, y, width, height = detections[0]['box']
+        face = image_rgb[y:y+height, x:x+width]
+        face_resized = cv2.resize(face, (160, 160))
+        face_embedding = embedder.embeddings([face_resized])[0]
+        embeddings_old.append(face_embedding)
 
     # 각 이미지에서 얼굴 탐지 및 임베딩 생성
     for idx, photo_path in enumerate(photos_path_new):
         image = cv2.imread(photo_path)
-        
+
         if image is None:
             raise ValueError(f"Failed to read image from path: {photo_path}")
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -95,60 +87,27 @@ def get_new_faces(embeddings_bytes_old: list[bytes], labels_old: list[str], phot
 
     for i in range(len(labels_old), len(labels)):
         new = True
-        for j in range(len(labels_new)):
+        for j in range(len(labels_new) if create_labels else len(labels_old)):
             if labels[i] == labels[j]:
                 labels_new.append(labels_new[j])
                 new = False
                 break
         if new:
-            labels_new.append(max_without_str(labels_new) + 1)
+            if create_labels:
+                labels_new.append(max_without_str(labels_new) + 1)
+            else:
+                labels_new.append(None)
 
     labels_new = labels_new[-labels_new_len:] # 추가된 얼굴 라벨만 저장
-    for i in range(labels_new_len):
-        if isinstance(labels_new[i], int):
-            labels_new[i] = str(labels_new[i])
+    if create_labels:
+        for i in range(labels_new_len):
+            if isinstance(labels_new[i], int):
+                labels_new[i] = str(labels_new[i])
 
     data = []
     for i in range(labels_new_len):
-        data.append(face_locations_new[i] + [labels_new[i], embeddings_new[i].tobytes()])
+        data.append(face_locations_new[i] + [labels_new[i]])
     return data
-
-# embedding들을 저장하기 위해 데이터베이스를 초기화
-def init_db():
-    conn = sqlite3.connect("face_embeddings.db")
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS embeddings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            embedding BLOB NOT NULL
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-# 데이터베이스에 embedding을 저장하고 embedding ID를 반환
-def save_embedding_to_db(embedding: bytes) -> int:
-    conn = sqlite3.connect("face_embeddings.db")
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO embeddings (embedding) VALUES (?)", (embedding,))
-    conn.commit()
-    embedding_id = cursor.lastrowid
-    conn.close()
-    return embedding_id
-
-# 데이터베이스에서 embedding들과 label들을 받기
-def get_embeddings_from_db():
-    conn = sqlite3.connect("face_embeddings.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, embedding FROM embeddings")
-    rows = cursor.fetchall()
-    conn.close()
-    embedding_ids = []
-    embeddings = []
-    for row in rows:
-        embedding_ids.append(row[0])
-        embeddings.append(np.frombuffer(row[1], np.float32))
-    return embedding_ids, embeddings
 
 import openai
 import io
@@ -161,12 +120,12 @@ def compress_image_base64(image_path: str, quality=50) -> str:
     try:
         # 이미지 열기
         img = Image.open(image_path)
-        
+
         # 압축된 이미지 저장
         buffer = io.BytesIO()
         img.save(buffer, format="JPEG", quality=quality)  # JPEG 압축 사용
         buffer.seek(0)
-        
+
         # Base64로 인코딩
         base64_image = base64.b64encode(buffer.read()).decode("utf-8")
 
@@ -199,7 +158,7 @@ def get_categories(photos_path_new: list[str]) -> list[str]:
                 "image_url": {"url": f"data:{img_type};base64,{base64_image}"},
             },
         ]
-        
+
         try:
             # ChatGPT 모델에 요청
             response = client.chat.completions.create(
@@ -218,60 +177,62 @@ def get_categories(photos_path_new: list[str]) -> list[str]:
             return ValueError(f"Error during API call: {e}")
     return answers
 
-# 새로운 사진들을 get_new_faces와 get_categories로 처리하고 결과를 반환
-def process_photos_logic(photos_path_new: list[str], embedding_ids_old: list[int], labels_old: list[str]) -> list[PhotoData]:
-    embeddings_bytes_old = []
-    for embedding_id in embedding_ids_old:
-        conn = sqlite3.connect("face_embeddings.db")
-        cursor = conn.cursor()
-        cursor.execute("SELECT embedding FROM embeddings WHERE id = ?", (embedding_id,))
-        row = cursor.fetchone()
-        conn.close()
-        if row:
-            embeddings_bytes_old.append(row[0])
-
-    faces_data = get_new_faces(embeddings_bytes_old, labels_old, photos_path_new)
-    category_data = get_categories(photos_path_new)
-    print(category_data)
-    
-    # 새 embedding들을 저장하고 embedding ID들로 업데이트함
-    for item in faces_data:
-        embedding = item[-1]
-        label = item[-2]
-        embedding_id = save_embedding_to_db(embedding)
-        item[-1] = embedding_id  # Replace the embedding blob with the embedding ID
-
-    form = []
-    for i in range(len(photos_path_new)):
-        photo_path = photos_path_new[i]
-        face_list = []
-        for item in faces_data:
-            if i == item[0]:
-                face_list.append(PhotoFaceData(item))
-        form.append(PhotoData('Person' if face_list else category_data[i], face_list))
-    return form
-
 from fastapi import FastAPI, UploadFile, Form
 from fastapi.encoders import jsonable_encoder
 from typing import List
 import uvicorn
 
-init_db()
 app = FastAPI()
 
+@app.get("/test/faces")
+async def get_faces(image_path: str, is_url: bool):
+    if is_url:
+        pass
+    faces_data = get_new_faces([], [], [image_path], False)
+
+    form = []
+    for item in faces_data:
+        form.append(PhotoFaceData(item))
+    return form
+    #return {"faces_count": len(faces_data)}
+
 '''
+profile_image_paths: 프로필 사진 경로들
+profile_names: 프로필 이름들
 photo_paths: 새로 추가된 사진 경로들 
-embedding_ids: 기존 사진들의 얼굴들의 임베딩id들
-labels: 기존 사진들의 얼굴들의 이름
 '''
 # API Endpoints
-@app.post("/process_photos/")
-async def process_photos(
-    photo_paths: str = Form(),
-    embedding_ids: str = Form(),
-    labels: str = Form()
+@app.post("/process_photos/faces")
+async def process_photos_faces(
+        profile_image_paths: str = Form(),
+        profile_names: str = Form(),
+        photo_paths: str = Form()
 ):
-    result = process_photos_logic(eval(photo_paths), eval(embedding_ids), eval(labels))
+    profile_image_paths = eval(profile_image_paths)
+    profile_names = eval(profile_names)
+    photo_paths = eval(photo_paths)
+
+    faces_data = get_new_faces(profile_image_paths, profile_names, photo_paths, False)
+
+    form = []
+    for i in range(len(photo_paths)):
+        photo_path = photo_paths[i]
+        face_list = []
+        for item in faces_data:
+            if i == item[0]:
+                face_list.append(PhotoFaceData(item))
+        form.append(face_list)
+    return form
+
+'''
+photo_paths: 새로 추가된 사진 경로들
+'''
+# API Endpoints
+@app.post("/process_photos/category")
+async def process_photos_category(
+        photo_paths: str = Form(),
+):
+    result = get_categories(eval(photo_paths))
 
     return result
 
