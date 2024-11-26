@@ -80,6 +80,8 @@ def get_new_faces(profile_image_paths: list[str], labels_old: list[str], photos_
 
     # DBSCAN으로 얼굴 임베딩 군집화
     embeddings = embeddings_old + embeddings_new
+    if len(embeddings) == 0:
+        return []
     labels = dbscan.fit_predict(embeddings)
 
     labels_new_len = len(embeddings_new) # 추가된 얼굴 라벨 수
@@ -139,8 +141,10 @@ client = openai.OpenAI(api_key="",)
 def get_categories(photos_path_new: list[str]) -> list[str]:
     answers = []
     for photo_path in photos_path_new:
+        print(photo_path)
         # 이미지 읽기
         base64_image = compress_image_base64(photo_path, quality=20)
+        print(base64_image[:30])
         img_type = 'image/jpeg'
 
         # ChatGPT에 이미지 분석 요청
@@ -148,6 +152,8 @@ def get_categories(photos_path_new: list[str]) -> list[str]:
         prompt = (
             "이미지를 분석하고, 이미지의 주제를 Person, Nature, City, Food, Object, Animal, 또는 Others 중 하나로 한 영단어로 분류해 주세요. "
             "인물이면 Person, 자연경관이면 Nature, 도시이면 City, 음식이면 Food, 물건이면 Object, 동물이면 Animal, 그 외의 주제들은 Others를 고르면 됩니다. "
+            #"너무 모호하면 (예를 들어 50%가 인물이 주제인 것 같고 50%는 자연경관이 주제인 것 같으면) 여러 개 선택하면 됩니다."
+            #"여러 개 선택할 때는 각각을 쉼표로 구분하고, 공백은 없어야 합니다."
             "이미지는 Base64로 인코딩된 데이터로 제공됩니다: "
             f"{base64_image}... (생략)."
         )
@@ -181,20 +187,77 @@ from fastapi import FastAPI, UploadFile, Form
 from fastapi.encoders import jsonable_encoder
 from typing import List
 import uvicorn
+import requests
+import tempfile
+from urllib.parse import urlparse
+
+def process_path(path):
+    """URL은 임시 파일로 변환하고 로컬 경로는 그대로 반환."""
+    # URL인지 로컬 경로인지 확인
+    if urlparse(path).scheme in ("http", "https"):
+        try:
+            # URL에서 이미지 다운로드
+            response = requests.get(path, stream=True)
+            if response.status_code == 200:
+                # 임시 파일 생성
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
+                    temp_file.write(response.content)
+                    return temp_file.name
+            else:
+                raise ValueError(f"Failed to fetch image from URL: {path}. Status code: {response.status_code}")
+        except Exception as e:
+            raise ValueError(f"Error occurred while processing URL {path}: {str(e)}")
+    else:
+        # 로컬 경로일 경우
+        if os.path.exists(path):
+            return path
+        else:
+            raise ValueError(f"Invalid local path: {path}")
+
+def process_paths(paths):
+    """URL은 임시 파일로 변환하고 로컬 경로는 그대로 반환."""
+    try:
+        processed_paths = []
+        temp_files = []
+
+        for path in paths:
+            processed_path = process_path(path)
+            processed_paths.append(processed_path)
+            if path != processed_path:
+                temp_files.append(processed_path)
+
+        return processed_paths, temp_files
+    except ValueError as e:
+        # 임시 파일 삭제
+        for temp_file in temp_files:
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+        raise e
 
 app = FastAPI()
 
+'''
+image_path: 사진 한 장의 경로
+is_url: 사진이 URL경로이면 True, 로컬 디렉터리면 False
+'''
 @app.get("/test/faces")
-async def get_faces(image_path: str, is_url: bool):
-    if is_url:
-        pass
-    faces_data = get_new_faces([], [], [image_path], False)
+async def get_faces(image_path: str):
+    try:
+        processed_image_path = process_path(image_path)
+        faces_data = get_new_faces([], [], [processed_image_path], False)
 
-    form = []
-    for item in faces_data:
-        form.append(PhotoFaceData(item))
-    return form
-    #return {"faces_count": len(faces_data)}
+        form = []
+        for item in faces_data:
+            form.append(PhotoFaceData(item))
+        return form
+    except ValueError as e:
+        print(e)
+        return {"error": f'{e}'}
+    finally:
+        # 임시 파일 삭제
+        if processed_image_path != image_path:
+            if os.path.exists(processed_image_path):
+                os.remove(processed_image_path)
 
 '''
 profile_image_paths: 프로필 사진 경로들
@@ -208,21 +271,40 @@ async def process_photos_faces(
         profile_names: str = Form(),
         photo_paths: str = Form()
 ):
-    profile_image_paths = eval(profile_image_paths)
-    profile_names = eval(profile_names)
-    photo_paths = eval(photo_paths)
+    try:
+        # 문자열을 리스트로 변환
+        profile_image_paths = eval(profile_image_paths)
+        profile_names = eval(profile_names)
+        photo_paths = eval(photo_paths)
 
-    faces_data = get_new_faces(profile_image_paths, profile_names, photo_paths, False)
+        # profile_image_paths와 photo_paths 처리
+        processed_profile_image_paths, temp_files_profile = process_paths(profile_image_paths)
+        processed_photo_paths, temp_files_photos = process_paths(photo_paths)
 
-    form = []
-    for i in range(len(photo_paths)):
-        photo_path = photo_paths[i]
-        face_list = []
-        for item in faces_data:
-            if i == item[0]:
-                face_list.append(PhotoFaceData(item))
-        form.append(face_list)
-    return form
+        # get_new_faces 함수 호출
+        faces_data = get_new_faces(processed_profile_image_paths, profile_names, processed_photo_paths, False)
+
+        # 결과 포맷팅
+        form = []
+        for i in range(len(photo_paths)):
+            photo_path = photo_paths[i]
+            face_list = []
+            for item in faces_data:
+                if i == item[0]:
+                    face_list.append(PhotoFaceData(item))
+            form.append(face_list)
+        return form
+    
+    except ValueError as e:
+        print(e)
+        return {"error": f'{e}'}
+    
+    finally:
+        # 임시 파일 삭제
+        temp_files = temp_files_profile + temp_files_photos
+        for temp_file_path in temp_files:
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
 
 '''
 photo_paths: 새로 추가된 사진 경로들
@@ -232,9 +314,27 @@ photo_paths: 새로 추가된 사진 경로들
 async def process_photos_category(
         photo_paths: str = Form(),
 ):
-    result = get_categories(eval(photo_paths))
+    try:
+        # 문자열로 받은 photo_paths를 리스트로 변환
+        photo_paths = eval(photo_paths)
+        
+        # 변환된 경로를 저장할 리스트
+        processed_paths, temp_files = process_paths(photo_paths)
 
-    return result
+        # get_categories 함수에 변환된 경로 전달
+        result = get_categories(processed_paths)
+
+        return result
+    
+    except ValueError as e:
+        print(e)
+        return {"error": f'{e}'}
+    
+    finally:
+        # 처리 중 생성된 임시 파일 삭제
+        for temp_file_path in temp_files:
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
 
 # Run the server
 if __name__ == "__main__":
