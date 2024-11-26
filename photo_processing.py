@@ -183,7 +183,7 @@ def get_categories(photos_path_new: list[str]) -> list[str]:
             return ValueError(f"Error during API call: {e}")
     return answers
 
-from fastapi import FastAPI, UploadFile, Form
+from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.encoders import jsonable_encoder
 from typing import List
 import uvicorn
@@ -240,6 +240,35 @@ app = FastAPI()
 image_path: 사진 한 장의 경로
 is_url: 사진이 URL경로이면 True, 로컬 디렉터리면 False
 '''
+@app.post("/test/faces")
+async def get_faces(image: UploadFile = File(...)):
+    temp_file_path = None  # 임시 파일 경로 저장
+    try:
+        # 업로드된 이미지를 임시 파일로 저장
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
+            temp_file_path = temp_file.name
+            temp_file.write(await image.read())
+
+        # get_new_faces 호출
+        faces_data = get_new_faces([], [], [temp_file_path], False)
+
+        # 결과를 포맷팅하여 반환
+        form = []
+        for item in faces_data:
+            form.append(PhotoFaceData(item))
+        return form
+    except ValueError as e:
+        print(e)
+        return {"error": f'{e}'}
+    finally:
+        # 임시 파일 삭제
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+
+'''
+image_path: 사진 한 장의 경로
+is_url: 사진이 URL경로이면 True, 로컬 디렉터리면 False
+'''
 @app.get("/test/faces")
 async def get_faces(image_path: str):
     try:
@@ -255,7 +284,7 @@ async def get_faces(image_path: str):
         return {"error": f'{e}'}
     finally:
         # 임시 파일 삭제
-        if processed_image_path != image_path:
+        if not processed_image_path and processed_image_path != image_path:
             if os.path.exists(processed_image_path):
                 os.remove(processed_image_path)
 
@@ -294,11 +323,11 @@ async def process_photos_faces(
                     face_list.append(PhotoFaceData(item))
             form.append(face_list)
         return form
-    
+
     except ValueError as e:
         print(e)
         return {"error": f'{e}'}
-    
+
     finally:
         # 임시 파일 삭제
         temp_files = temp_files_profile + temp_files_photos
@@ -317,7 +346,7 @@ async def process_photos_category(
     try:
         # 문자열로 받은 photo_paths를 리스트로 변환
         photo_paths = eval(photo_paths)
-        
+
         # 변환된 경로를 저장할 리스트
         processed_paths, temp_files = process_paths(photo_paths)
 
@@ -325,11 +354,11 @@ async def process_photos_category(
         result = get_categories(processed_paths)
 
         return result
-    
+
     except ValueError as e:
         print(e)
         return {"error": f'{e}'}
-    
+
     finally:
         # 처리 중 생성된 임시 파일 삭제
         for temp_file_path in temp_files:
