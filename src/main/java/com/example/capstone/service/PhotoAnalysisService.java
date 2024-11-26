@@ -12,7 +12,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -27,9 +29,9 @@ public class PhotoAnalysisService {
     private final GroupMemberRepository groupMemberRepository;
     private final PhotoRepository photoRepository;
     private final FaceRepository faceRepository;
+    private final UserFaceRepository userFaceRepository;
     private final ConcurrentHashMap<Long, Object> lockMap = new ConcurrentHashMap<>();
     private final String pythonServerUrl = "http://127.0.0.1:8000/process_photos/";
-    private final UserFaceRepository userFaceRepository;
 
     // groupId에 해당하는 Lock 객체 가져오기
     private Object getLock(Long groupId) {
@@ -43,6 +45,42 @@ public class PhotoAnalysisService {
             }
             return existingLock;
         });
+    }
+
+    @Async
+    public boolean isValidProfileImage(MultipartFile file) {
+        try {
+            // Convert MultipartFile to byte array
+            byte[] fileBytes = file.getBytes();
+
+            // Create headers
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+
+            // Create request entity
+            HttpEntity<byte[]> requestEntity = new HttpEntity<>(fileBytes, headers);
+
+            // Send POST request and receive response as PhotoFaceDto[]
+            ResponseEntity<PhotoFaceDto[]> response = restTemplate.exchange(
+                    "http://localhost:8000/test/faces",
+                    HttpMethod.POST,
+                    requestEntity,
+                    PhotoFaceDto[].class
+            );
+
+            // Check response status
+            if (response.getStatusCode() != HttpStatus.OK || response.getBody() == null) {
+                return false;
+            }
+
+            // Validate profile image based on face detection
+            PhotoFaceDto[] faceData = response.getBody();
+            return faceData.length == 1; // Example: valid if at least one face is detected
+
+        } catch (IOException | IllegalStateException e) {
+            e.printStackTrace();
+            return false;
+        }
     }
 
     @Async
