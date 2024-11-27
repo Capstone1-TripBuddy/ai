@@ -7,6 +7,7 @@ from keras_facenet import FaceNet
 from sklearn.cluster import DBSCAN
 import random
 from pydantic import BaseModel
+import time
 
 class PhotoFaceData(BaseModel):
     x: int
@@ -118,17 +119,30 @@ import base64
 import requests
 import mimetypes
 
-def compress_image_base64(image_path: str, quality=50) -> str:
+def compress_image_base64(image_path: str, max_size_kb: int = 80, initial_quality: int = 100) -> str:
     try:
         # 이미지 열기
         img = Image.open(image_path)
 
-        # 압축된 이미지 저장
+        # 압축 품질 조정
+        quality = initial_quality
         buffer = io.BytesIO()
-        img.save(buffer, format="JPEG", quality=quality)  # JPEG 압축 사용
-        buffer.seek(0)
+
+        # 반복적으로 압축하여 파일 크기를 확인
+        while True:
+            buffer.seek(0)
+            buffer.truncate()
+            img.save(buffer, format="JPEG", quality=quality)
+            size_kb = buffer.tell() / 1024  # 현재 크기 (KB)
+
+            if size_kb <= max_size_kb or quality <= 2:  # 크기 만족 또는 최소 품질 도달
+                break
+
+            quality //= 2  # 품질 점진적으로 감소
+        print(f'Q: {quality}, S: {size_kb}')
 
         # Base64로 인코딩
+        buffer.seek(0)
         base64_image = base64.b64encode(buffer.read()).decode("utf-8")
 
         return base64_image
@@ -138,24 +152,64 @@ def compress_image_base64(image_path: str, quality=50) -> str:
 # OpenAI API 키 설정
 client = openai.OpenAI(api_key="",)
 
-def get_categories(photos_path_new: list[str]) -> list[str]:
+def get_category(photo_path: str) -> str:
+    #t = time.time()
+    base64_image = compress_image_base64(photo_path)
+    #print('COMPRESSING TIME:', time.time() - t)
+    img_type = 'image/jpeg'
+
+    # ChatGPT에 이미지 분석 요청
+    # Prompt 준비
+    prompt = (
+        "이미지를 분석하고, 이미지의 주제를 PERSON, NATURE, CITY, FOOD, OBJECT, ANIMAL, 또는 OTHERS 중 하나로 한 대문자 영단어로 분류해 주세요. "
+        "인물이면 PERSON, 자연경관이면 NATURE, 도시이면 CITY, 음식이면 FOOD, 물건이면 OBJECT, 동물이면 ANIMAL, 그 외의 주제들은 OTHERS를 고르면 됩니다. "
+        "너무 모호하면 (예를 들어 50%가 인물이 주제인 것 같고 50%는 자연경관이 주제인 것 같으면) 여러 개 선택하면 됩니다."
+        "여러 개 선택할 때는 각각을 쉼표로 구분하고, 공백은 없어야 합니다."
+        "이미지는 Base64로 인코딩된 데이터로 제공됩니다."
+    )
+    content = [
+        {"type": "text", "text": prompt},
+        {
+            "type": "image_url",
+            "image_url": {"url": f"data:{img_type};base64,{base64_image}"},
+        },
+    ]
+
+    try:
+        # ChatGPT 모델에 요청
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are an assistant specializing in image classification."},
+                {"role": "user", "content": content},
+            ],
+        )
+        # 결과 가져오기
+        answer = response.choices[0].message.content
+        answer = answer.strip('\'"')
+        print(answer)
+        return answer
+
+    except Exception as e:
+        return ValueError(f"Error during API call: {e}")
+
+def get_categories(photos_path: list[str]) -> list[str]:
     answers = []
-    for photo_path in photos_path_new:
-        print(photo_path)
+    for photo_path in photos_path:
         # 이미지 읽기
-        base64_image = compress_image_base64(photo_path, quality=20)
-        print(base64_image[:30])
+        #t = time.time()
+        base64_image = compress_image_base64(photo_path)
+        #print('COMPRESSING TIME:', time.time() - t)
         img_type = 'image/jpeg'
 
         # ChatGPT에 이미지 분석 요청
         # Prompt 준비
         prompt = (
-            "이미지를 분석하고, 이미지의 주제를 Person, Nature, City, Food, Object, Animal, 또는 Others 중 하나로 한 영단어로 분류해 주세요. "
-            "인물이면 Person, 자연경관이면 Nature, 도시이면 City, 음식이면 Food, 물건이면 Object, 동물이면 Animal, 그 외의 주제들은 Others를 고르면 됩니다. "
-            #"너무 모호하면 (예를 들어 50%가 인물이 주제인 것 같고 50%는 자연경관이 주제인 것 같으면) 여러 개 선택하면 됩니다."
-            #"여러 개 선택할 때는 각각을 쉼표로 구분하고, 공백은 없어야 합니다."
-            "이미지는 Base64로 인코딩된 데이터로 제공됩니다: "
-            f"{base64_image}... (생략)."
+            "이미지를 분석하고, 이미지의 주제를 PERSON, NATURE, CITY, FOOD, OBJECT, ANIMAL, 또는 OTHERS 중 하나로 한 대문자 영단어로 분류해 주세요. "
+            "인물이면 PERSON, 자연경관이면 NATURE, 도시이면 CITY, 음식이면 FOOD, 물건이면 OBJECT, 동물이면 ANIMAL, 그 외의 주제들은 OTHERS를 고르면 됩니다. "
+            "너무 모호하면 (예를 들어 50%가 인물이 주제인 것 같고 50%는 자연경관이 주제인 것 같으면) 여러 개 선택하면 됩니다."
+            "여러 개 선택할 때는 각각을 쉼표로 구분하고, 공백은 없어야 합니다."
+            "이미지는 Base64로 인코딩된 데이터로 제공됩니다."
         )
         content = [
             {"type": "text", "text": prompt},
@@ -183,6 +237,13 @@ def get_categories(photos_path_new: list[str]) -> list[str]:
             return ValueError(f"Error during API call: {e}")
     return answers
 
+import concurrent.futures
+
+def get_categories_parallel(photo_paths: list[str]):
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        results = list(executor.map(get_category, photo_paths))
+    return results
+
 from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.encoders import jsonable_encoder
 from typing import List
@@ -190,6 +251,16 @@ import uvicorn
 import requests
 import tempfile
 from urllib.parse import urlparse
+
+def convert_to_jpg(image_path):
+    """이미지를 JPG로 변환하고 변환된 파일 경로 반환"""
+    with Image.open(image_path) as img:
+        if img.format != "JPEG":
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
+                rgb_img = img.convert("RGB")  # JPG는 RGB 포맷을 사용해야 함
+                rgb_img.save(temp_file.name, format="JPEG")
+                return temp_file.name
+        return image_path
 
 def process_path(path):
     """URL은 임시 파일로 변환하고 로컬 경로는 그대로 반환."""
@@ -202,7 +273,12 @@ def process_path(path):
                 # 임시 파일 생성
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
                     temp_file.write(response.content)
-                    return temp_file.name
+                    temp_file_path = temp_file.name
+                # JPG로 변환 및 기존 임시 파일 삭제
+                converted_path = convert_to_jpg(temp_file_path)
+                if converted_path != temp_file_path:
+                    os.remove(temp_file_path)
+                return converted_path
             else:
                 raise ValueError(f"Failed to fetch image from URL: {path}. Status code: {response.status_code}")
         except Exception as e:
@@ -210,12 +286,11 @@ def process_path(path):
     else:
         # 로컬 경로일 경우
         if os.path.exists(path):
-            return path
+            return convert_to_jpg(path)
         else:
             raise ValueError(f"Invalid local path: {path}")
 
 def process_paths(paths):
-    """URL은 임시 파일로 변환하고 로컬 경로는 그대로 반환."""
     try:
         processed_paths = []
         temp_files = []
@@ -238,10 +313,10 @@ app = FastAPI()
 
 '''
 image_path: 사진 한 장의 경로
-is_url: 사진이 URL경로이면 True, 로컬 디렉터리면 False
 '''
 @app.post("/test/faces")
 async def get_faces(image: UploadFile = File(...)):
+    t = time.time()
     temp_file_path = None  # 임시 파일 경로 저장
     try:
         # 업로드된 이미지를 임시 파일로 저장
@@ -257,20 +332,22 @@ async def get_faces(image: UploadFile = File(...)):
         for item in faces_data:
             form.append(PhotoFaceData(item))
         return form
-    except ValueError as e:
+    except Exception as e:
         print(e)
         return {"error": f'{e}'}
     finally:
         # 임시 파일 삭제
         if temp_file_path and os.path.exists(temp_file_path):
             os.remove(temp_file_path)
+        t = time.time() - t
+        print(f'PROCESS TIME: {t}')
 
 '''
 image_path: 사진 한 장의 경로
-is_url: 사진이 URL경로이면 True, 로컬 디렉터리면 False
 '''
 @app.get("/test/faces")
 async def get_faces(image_path: str):
+    t = time.time()
     try:
         processed_image_path = process_path(image_path)
         faces_data = get_new_faces([], [], [processed_image_path], False)
@@ -279,7 +356,7 @@ async def get_faces(image_path: str):
         for item in faces_data:
             form.append(PhotoFaceData(item))
         return form
-    except ValueError as e:
+    except Exception as e:
         print(e)
         return {"error": f'{e}'}
     finally:
@@ -287,6 +364,8 @@ async def get_faces(image_path: str):
         if not processed_image_path and processed_image_path != image_path:
             if os.path.exists(processed_image_path):
                 os.remove(processed_image_path)
+        t = time.time() - t
+        print(f'PROCESS TIME: {t}')
 
 '''
 profile_image_paths: 프로필 사진 경로들
@@ -300,6 +379,7 @@ async def process_photos_faces(
         profile_names: str = Form(),
         photo_paths: str = Form()
 ):
+    t = time.time()
     try:
         # 문자열을 리스트로 변환
         profile_image_paths = eval(profile_image_paths)
@@ -323,17 +403,19 @@ async def process_photos_faces(
                     face_list.append(PhotoFaceData(item))
             form.append(face_list)
         return form
-
-    except ValueError as e:
+    
+    except Exception as e:
         print(e)
         return {"error": f'{e}'}
-
+    
     finally:
         # 임시 파일 삭제
         temp_files = temp_files_profile + temp_files_photos
         for temp_file_path in temp_files:
             if os.path.exists(temp_file_path):
                 os.remove(temp_file_path)
+        t = time.time() - t
+        print(f'PROCESS TIME: {t}')
 
 '''
 photo_paths: 새로 추가된 사진 경로들
@@ -343,27 +425,29 @@ photo_paths: 새로 추가된 사진 경로들
 async def process_photos_category(
         photo_paths: str = Form(),
 ):
+    t = time.time()
     try:
         # 문자열로 받은 photo_paths를 리스트로 변환
         photo_paths = eval(photo_paths)
-
+        
         # 변환된 경로를 저장할 리스트
         processed_paths, temp_files = process_paths(photo_paths)
 
         # get_categories 함수에 변환된 경로 전달
-        result = get_categories(processed_paths)
+        result = get_categories_parallel(processed_paths)
 
         return result
-
-    except ValueError as e:
+    
+    except Exception as e:
         print(e)
         return {"error": f'{e}'}
-
     finally:
         # 처리 중 생성된 임시 파일 삭제
         for temp_file_path in temp_files:
             if os.path.exists(temp_file_path):
                 os.remove(temp_file_path)
+        t = time.time() - t
+        print(f'PROCESS TIME: {t}')
 
 # Run the server
 if __name__ == "__main__":
