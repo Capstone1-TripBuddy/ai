@@ -303,7 +303,7 @@ public class PhotoAnalysisService {
             // HttpEntity 생성
             HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
 
-            // POST 요청 보내고 PhotoFaceDto[]로 응답 받기
+            // POST 요청 보내고 String[]로 응답 받기
             ResponseEntity<String[]> response = restTemplate.exchange(
                     pythonServerUrl + "process_photos/questions",
                     HttpMethod.POST,
