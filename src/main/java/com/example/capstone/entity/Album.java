@@ -11,13 +11,16 @@ import jakarta.persistence.Lob;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.ColumnDefault;
+import org.hibernate.annotations.DynamicInsert;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 
+@DynamicInsert
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @Getter
 @Entity
@@ -28,15 +31,10 @@ public class Album {
   @GeneratedValue(strategy = GenerationType.IDENTITY)  // ID를 자동으로 생성
   private Long id;
 
-  @ManyToOne(fetch = FetchType.LAZY, optional = false)
-  @OnDelete(action = OnDeleteAction.CASCADE)
-  @JoinColumn(name = "user_id", nullable = false)
-  private User user;
-
-  @ManyToOne(fetch = FetchType.LAZY, optional = false)
+  @ManyToOne(fetch = FetchType.EAGER, optional = false)
   @OnDelete(action = OnDeleteAction.CASCADE)
   @JoinColumn(name = "group_id", nullable = false)
-  private TravelGroup groupId;
+  private TravelGroup group;
 
   @Column(name = "title", nullable = false)
   private String title;
@@ -47,8 +45,11 @@ public class Album {
 
   @ColumnDefault("CURRENT_TIMESTAMP")
   @Column(name = "created_at")
-  private Instant createdAt;
+  private LocalDateTime createdAt;
 
-  public Album(final long id, final User user, final TravelGroup travelGroup, final String testTitle, final Instant now) {
+  public Album(final TravelGroup travelGroup, final String albumTitle, final String albumDescription) {
+    this.group = travelGroup;
+    this.title = albumTitle;
+    this.description = albumDescription;
   }
 }

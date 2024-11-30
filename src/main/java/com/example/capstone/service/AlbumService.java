@@ -20,10 +20,12 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
+import org.hibernate.Hibernate;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class AlbumService {
@@ -35,12 +37,12 @@ public class AlbumService {
   private final FileService fileService;
 
   public AlbumService(
-      final TravelGroupRepository travelGroupRepository,
-      final AlbumRepository albumRepository,
-      final AlbumPhotoRepository albumPhotoRepository,
-      final PhotoRepository photoRepository,
-      final FileService fileService
-      ) {
+          final TravelGroupRepository travelGroupRepository,
+          final AlbumRepository albumRepository,
+          final AlbumPhotoRepository albumPhotoRepository,
+          final PhotoRepository photoRepository,
+          final FileService fileService
+  ) {
     this.travelGroupRepository = travelGroupRepository;
     this.albumRepository = albumRepository;
     this.albumPhotoRepository = albumPhotoRepository;
@@ -49,17 +51,23 @@ public class AlbumService {
   }
 
 
-  public List<ResponseAlbumDTO> findAllAlbums(long groupId) {
-    Optional<TravelGroup> group = travelGroupRepository.findById(groupId);
-    if (group.isEmpty()) {
+  @Transactional(readOnly = true)
+  public List<ResponseAlbumDTO> findAllAlbums(Long groupId) {
+    // Fetch the TravelGroup entity based on the provided groupId
+    TravelGroup group = travelGroupRepository.findById(groupId)
+            .orElse(null);
+    if (group == null) {
       return Collections.emptyList();
     }
-    List<Album> albums = albumRepository.findAllByGroupId(group.get());
 
+    List<Album> albums = albumRepository.findAllByGroupId(groupId);
+
+    // Map the albums to DTOs and return
     return albums.stream()
-        .map(ResponseAlbumDTO::fromEntity)
-        .collect(Collectors.toList());
+            .map(ResponseAlbumDTO::fromEntity)
+            .collect(Collectors.toList());
   }
+
 
   public Optional<List<ResponsePhotoDTO>> findAllAlbumPhotos(RequestAlbumDTO request) {
     List<AlbumPhoto> albumPhotos = albumPhotoRepository.findByAlbumTitle(request.getTitle());
@@ -67,16 +75,15 @@ public class AlbumService {
       return Optional.empty();
     }
 
-    // 페이지네이션 및 이미지 정보 매핑
     List<ResponsePhotoDTO> response = new ArrayList<>();
     for (AlbumPhoto albumPhoto : albumPhotos) {
       Photo photo = albumPhoto.getPhoto();
 
       ResponsePhotoDTO tmp = new ResponsePhotoDTO(
-          photo.getFileName(),
-          fileService.getFileUrl(photo.getFilePath()),
-          photo.getImageSize(),
-          photo.getUploadDate()
+              photo.getFileName(),
+              fileService.generateSignedUrl(photo.getFilePath()),
+              photo.getImageSize(),
+              photo.getUploadedAt()
       );
       response.add(tmp);
     }
@@ -110,8 +117,8 @@ public class AlbumService {
     headers.add("Content-Type", "application/zip");
 
     return Optional.of(ResponseEntity.ok()
-        .headers(headers)
-        .body(new ByteArrayResource(baos.toByteArray())));
+            .headers(headers)
+            .body(new ByteArrayResource(baos.toByteArray())));
   }
 
 }

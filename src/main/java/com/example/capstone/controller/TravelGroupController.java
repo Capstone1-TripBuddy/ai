@@ -5,6 +5,7 @@ import com.example.capstone.dto.RequestTravelGroupDTO;
 import com.example.capstone.dto.ResponseTravelGroupDTO;
 import com.example.capstone.service.TravelGroupService;
 import com.example.capstone.service.UserService;
+import jakarta.persistence.EntityExistsException;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -22,12 +23,12 @@ public class TravelGroupController {
   private UserService userService;
 
   // Create a new travel group
-  @PostMapping("/")
+  @PostMapping
   public ResponseEntity<ResponseTravelGroupDTO> createGroup(@RequestBody RequestTravelGroupDTO travelGroupDTO) {
     Optional<ResponseTravelGroupDTO> createdGroup = travelGroupService.createGroup(travelGroupDTO);
     return createdGroup.map(
-            responseTravelGroupDTO -> new ResponseEntity<>(responseTravelGroupDTO, HttpStatus.CREATED))
-        .orElseGet(() -> new ResponseEntity<>(HttpStatus.NOT_FOUND));
+                    responseTravelGroupDTO -> new ResponseEntity<>(responseTravelGroupDTO, HttpStatus.CREATED))
+            .orElseGet(() -> new ResponseEntity<>(HttpStatus.NOT_FOUND));
   }
 
   @PostMapping("/members")
@@ -35,7 +36,18 @@ public class TravelGroupController {
     Optional<ResponseTravelGroupDTO> travelGroupDTO = travelGroupService.joinGroupByInviteCode(requestGroupMemberDTO);
 
     return travelGroupDTO.map(
-            responseTravelGroupDTO -> new ResponseEntity<>(responseTravelGroupDTO, HttpStatus.CREATED))
-        .orElseGet(() -> new ResponseEntity<>(HttpStatus.BAD_REQUEST));
+                    responseTravelGroupDTO -> new ResponseEntity<>(responseTravelGroupDTO, HttpStatus.CREATED))
+            .orElseGet(() -> new ResponseEntity<>(HttpStatus.BAD_REQUEST));
+  }
+
+  @GetMapping("/members/{groupId}")
+  public ResponseEntity<ResponseTravelGroupDTO> getAllMembers(@PathVariable Long groupId) {
+    // TO DO
+    return new ResponseEntity<>(HttpStatus.OK);
+  }
+
+  @ExceptionHandler(EntityExistsException.class)
+  public ResponseEntity<Void> entityExistsExceptionHandler(EntityExistsException e) {
+    return new ResponseEntity<>(HttpStatus.CONFLICT);
   }
 }

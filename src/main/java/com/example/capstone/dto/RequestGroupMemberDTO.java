@@ -16,25 +16,18 @@ import org.springframework.web.multipart.MultipartFile;
 @Setter
 public class RequestGroupMemberDTO {
 
-  long userId;
+  Long userId;
 
   String inviteCode;
 
 
-  private RequestGroupMemberDTO(long userId, String inviteCode) {
+  private RequestGroupMemberDTO(Long userId, String inviteCode) {
     this.userId = userId;
     this.inviteCode = inviteCode;
   }
 
-  public static RequestGroupMemberDTO createResponseTravelGroupDTO(long userId, String inviteCode) {
+  public static RequestGroupMemberDTO createResponseTravelGroupDTO(Long userId, String inviteCode) {
     return new RequestGroupMemberDTO(userId, inviteCode);
-  }
-
-  public static GroupMember toEntity(TravelGroup travelGroup, User user) {
-    return new GroupMember(
-        travelGroup,
-        user
-    );
   }
 
 }

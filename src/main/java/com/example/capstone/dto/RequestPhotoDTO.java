@@ -19,13 +19,12 @@ import org.springframework.web.multipart.MultipartFile;
 public class RequestPhotoDTO {
 
   @NotBlank
-  private long userId;
+  private Long userId;
 
   @NotBlank
-  private long groupId;
+  private Long groupId;
 
   @NotBlank
   private List<MultipartFile> photos;
-
 
 }

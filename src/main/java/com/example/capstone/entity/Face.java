@@ -30,6 +30,11 @@ public class Face {
   @JoinColumn(name = "photo_id", nullable = false)
   private Photo photo;
 
+  @ManyToOne(fetch = FetchType.LAZY)
+  @OnDelete(action = OnDeleteAction.CASCADE)
+  @JoinColumn(name = "user_id")
+  private User user;
+
   @Lob
   @Column(name = "bounding_box", nullable = false)
   private String boundingBox;

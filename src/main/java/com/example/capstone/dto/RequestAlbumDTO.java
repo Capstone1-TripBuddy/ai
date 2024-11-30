@@ -13,7 +13,7 @@ import lombok.Setter;
 public class RequestAlbumDTO {
 
   @NotBlank
-  long groupId;
+  Long groupId;
 
   @NotBlank
   String title;

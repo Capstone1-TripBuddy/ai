@@ -8,6 +8,7 @@ from sklearn.cluster import DBSCAN
 import random
 from pydantic import BaseModel
 import time
+import traceback
 
 class PhotoFaceData(BaseModel):
     x: int
@@ -55,6 +56,8 @@ def get_new_faces(profile_image_paths: list[str], labels_old: list[str], photos_
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
         detections = detector.detect_faces(image_rgb)
+        if not detections:
+            raise ValueError(f"Failed to detect a face in profile image: index({idx})")
         x, y, width, height = detections[0]['box']
         face = image_rgb[y:y+height, x:x+width]
         face_resized = cv2.resize(face, (160, 160))
@@ -253,7 +256,7 @@ def get_questions(photo_path: str) -> str:
     # ChatGPT에 이미지 분석 요청
     # Prompt 준비
     prompt = (
-        "주어진 이미지와 관련하여 내가 추억을 떠올릴 수 있을만한 질문을 많이 생성해주세요."
+        "주어진 이미지와 관련하여 내가 추억을 떠올릴 수 있을만한 질문을 3개 생성해주세요."
         "다른 문장도 필요 없고 오로지 질문 리스트만 나열해주세요. 항목 번호도 필요 없습니다."
         "각 질문은 개행으로만 구분해주세요."
         "이미지는 Base64로 인코딩된 데이터로 제공됩니다."
@@ -373,8 +376,8 @@ async def get_faces(image: UploadFile = File(...)):
             form.append(PhotoFaceData(item))
         return form
     except Exception as e:
-        print(e)
-        return {"error": f'{e}'}
+        print(traceback.format_exc())
+        return {"error": e}
     finally:
         # 임시 파일 삭제
         if temp_file_path and os.path.exists(temp_file_path):
@@ -397,8 +400,8 @@ async def get_faces(image_path: str):
             form.append(PhotoFaceData(item))
         return form
     except Exception as e:
-        print(e)
-        return {"error": f'{e}'}
+        print(traceback.format_exc())
+        return {"error": e}
     finally:
         # 임시 파일 삭제
         if not processed_image_path and processed_image_path != image_path:
@@ -425,6 +428,9 @@ async def process_photos_faces(
         profile_image_paths = eval(profile_image_paths)
         profile_names = eval(profile_names)
         photo_paths = eval(photo_paths)
+        print(profile_image_paths)
+        print(profile_names)
+        print(photo_paths)
 
         # profile_image_paths와 photo_paths 처리
         processed_profile_image_paths, temp_files_profile = process_paths(profile_image_paths)
@@ -445,8 +451,8 @@ async def process_photos_faces(
         return form
 
     except Exception as e:
-        print(e)
-        return {"error": f'{e}'}
+        print(traceback.format_exc())
+        return {"error": e}
 
     finally:
         # 임시 파일 삭제
@@ -479,8 +485,8 @@ async def process_photos_category(
         return result
 
     except Exception as e:
-        print(e)
-        return {"error": f'{e}'}
+        print(traceback.format_exc())
+        return {"error": e}
     finally:
         # 처리 중 생성된 임시 파일 삭제
         for temp_file_path in temp_files:
@@ -506,8 +512,8 @@ async def process_photos_questions(image: UploadFile = File(...)):
         form = faces_data
         return form
     except Exception as e:
-        print(e)
-        return {"error": f'{e}'}
+        print(traceback.format_exc())
+        return {"error": e}
     finally:
         # 임시 파일 삭제
         if temp_file_path and os.path.exists(temp_file_path):

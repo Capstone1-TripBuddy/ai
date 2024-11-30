@@ -5,6 +5,7 @@ import com.example.capstone.dto.PhotoFaceDto;
 import com.example.capstone.entity.*;
 import com.example.capstone.repository.*;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.*;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -15,6 +16,7 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -29,15 +31,14 @@ public class PhotoAnalysisService {
     private final AlbumRepository albumRepository;
     private final AlbumPhotoRepository albumPhotoRepository;
     private final ConcurrentHashMap<Long, Object> lockMap = new ConcurrentHashMap<>();
-    private final String pythonServerUrl = "http://127.0.0.1:8000/process_photos/";
+    private final String pythonServerUrl = "http://127.0.0.1:8000/";
+    private final String dataServerRootUrl = "https://photo-bucket-012.s3.ap-northeast-2.amazonaws.com/";
 
     public static HashMap<String, String> map;
     static {
         map = new HashMap<>();
-        map.put("NATURE", "자연");
-        map.put("CITY", "도시");
+        map.put("SIGHT", "풍경");
         map.put("FOOD", "음식");
-        map.put("OBJECT", "물건");
         map.put("ANIMAL", "동물");
     }
 
@@ -64,31 +65,38 @@ public class PhotoAnalysisService {
     @Async
     public int isValidProfileImage(MultipartFile file) throws IOException {
         try {
-            // Convert MultipartFile to byte array
-            byte[] fileBytes = file.getBytes();
+            // RestTemplate 인스턴스 생성
+            RestTemplate restTemplate = new RestTemplate();
 
-            // Create headers
+            // MultiValueMap 생성
+            MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+            body.add("image", new ByteArrayResource(file.getBytes()) {
+                @Override
+                public String getFilename() {
+                    return file.getOriginalFilename(); // 파일 이름 설정
+                }
+            });
+
+            // 헤더 설정
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.MULTIPART_FORM_DATA);
 
-            // Create request entity
-            RestTemplate restTemplate = new RestTemplate();
-            HttpEntity<byte[]> requestEntity = new HttpEntity<>(fileBytes, headers);
+            // HttpEntity 생성
+            HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
 
-            // Send POST request and receive response as PhotoFaceDto[]
+            // POST 요청 보내고 PhotoFaceDto[]로 응답 받기
             ResponseEntity<PhotoFaceDto[]> response = restTemplate.exchange(
-                    "http://localhost:8000/test/faces",
+                    pythonServerUrl + "test/faces",
                     HttpMethod.POST,
                     requestEntity,
                     PhotoFaceDto[].class
             );
 
-            // Check response status
+            // 응답 상태 확인
             if (response.getStatusCode() != HttpStatus.OK || response.getBody() == null) {
                 throw new RuntimeException("Response Error");
             }
 
-            // Validate profile image based on face detection
             PhotoFaceDto[] faceData = response.getBody();
             return faceData.length;
 
@@ -116,7 +124,7 @@ public class PhotoAnalysisService {
                 List<String> newPhotoPaths = new ArrayList<>();
 
                 for (Photo photo : newPhotoList) {
-                    newPhotoPaths.add(photo.getFilePath());
+                    newPhotoPaths.add(dataServerRootUrl + photo.getFilePath());
                 }
 
                 RestTemplate restTemplate = new RestTemplate();
@@ -128,7 +136,7 @@ public class PhotoAnalysisService {
                 HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
 
                 ResponseEntity<String[]> response = restTemplate.exchange(
-                        pythonServerUrl,
+                        pythonServerUrl + "process_photos/category",
                         HttpMethod.POST,
                         requestEntity,
                         String[].class
@@ -143,14 +151,13 @@ public class PhotoAnalysisService {
                     String categoriesString = categories[i];
 
                     // 하나의 사진도 여러 개의 카테고리를 가질 수 있으며, 쉼표로 구분됨
-                    // PERSON, NATURE, CITY, FOOD, OBJECT, ANIMAL, OTHERS 에서 선택됨
+                    // PERSON, SIGHT, FOOD, OBJECT, ANIMAL, OTHERS 에서 선택됨
                     // PERSON은 processImagesFaces()에서 처리하면 되고
                     // OTHERS는 기타이므로 무시하면 됨(?)
                     String[] ts = categoriesString.split(",");
                     for (String t : ts) {
-                        if (Objects.equals(t, "NATURE") || Objects.equals(t, "CITY")
-                                || Objects.equals(t, "FOOD") || Objects.equals(t, "OBJECT")
-                                || Objects.equals(t, "ANIMAL")) {
+                        if (Objects.equals(t, "SIGHT") || Objects.equals(t, "FOOD")
+                                || Objects.equals(t, "OBJECT") || Objects.equals(t, "ANIMAL")) {
                             String title = map.get(t);
                             Optional<Album> albumOptional = albumRepository.findByGroupAndTitle(group, title);
                             if (albumOptional.isEmpty()) {
@@ -205,11 +212,12 @@ public class PhotoAnalysisService {
                 List<String> groupMemberNames = new ArrayList<>();
 
                 for (Photo photo : photoList) {
-                    photoPaths.add(photo.getFilePath());
+                    photoPaths.add(dataServerRootUrl + photo.getFilePath());
                 }
 
                 for (int i = 0; i < groupMemberList.size(); ++i) {
-                    groupMemberProfilePics.add(groupMemberList.get(i).getUser().getProfilePicture());
+                    groupMemberProfilePics.add(dataServerRootUrl + groupMemberList.get(i).getUser().getProfilePicture());
+                    // 실제 이름이 아니라 groupMemberNames에서 몇 번째인지
                     groupMemberNames.add(String.valueOf(i));
                 }
 
@@ -226,7 +234,7 @@ public class PhotoAnalysisService {
                 HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
 
                 ResponseEntity<PhotoFaceDto[][]> response = restTemplate.exchange(
-                        pythonServerUrl,
+                        pythonServerUrl + "process_photos/faces",
                         HttpMethod.POST,
                         requestEntity,
                         PhotoFaceDto[][].class
@@ -239,7 +247,7 @@ public class PhotoAnalysisService {
                     PhotoFaceDto[] facesData = photosData[i];
                     Photo photo = photoList.get(i);
                     photo.setHasFace(facesData != null && facesData.length > 0);
-                    photo.setAnalyzedAt(LocalDateTime.now());
+                    photo.setAnalyzedAt(Instant.now());
                     photoRepository.save(photo);
                     for (int j = 0, lf = facesData == null ? 0 : facesData.length; j < lf; j++) {
                         PhotoFaceDto faceData = facesData[j];
@@ -270,6 +278,49 @@ public class PhotoAnalysisService {
                 // 필요에 따라 Lock 객체를 제거 (메모리 관리)
                 removeLockIfUnused(groupId, lock);
             }
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public String[] getImageQueations(MultipartFile file) throws IOException {
+        try {
+            // RestTemplate 인스턴스 생성
+            RestTemplate restTemplate = new RestTemplate();
+
+            // MultiValueMap 생성
+            MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+            body.add("image", new ByteArrayResource(file.getBytes()) {
+                @Override
+                public String getFilename() {
+                    return file.getOriginalFilename(); // 파일 이름 설정
+                }
+            });
+
+            // 헤더 설정
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+
+            // HttpEntity 생성
+            HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
+
+            // POST 요청 보내고 PhotoFaceDto[]로 응답 받기
+            ResponseEntity<String[]> response = restTemplate.exchange(
+                    pythonServerUrl + "process_photos/questions",
+                    HttpMethod.POST,
+                    requestEntity,
+                    String[].class
+            );
+
+            // 응답 상태 확인
+            if (response.getStatusCode() != HttpStatus.OK || response.getBody() == null) {
+                throw new RuntimeException("Response Error");
+            }
+
+            return response.getBody();
+
+        } catch (IOException | IllegalStateException e) {
+            e.printStackTrace();
+            throw e;
         }
     }
 }

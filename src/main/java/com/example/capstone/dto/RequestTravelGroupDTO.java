@@ -12,31 +12,29 @@ import lombok.Setter;
 
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @Getter
-@Setter
 public class RequestTravelGroupDTO {
 
   @NotBlank
   String groupName;
 
   @NotBlank
-  long creatorId;
+  Long creatorId;
 
-  private RequestTravelGroupDTO(String groupName, long creatorId) {
+  private RequestTravelGroupDTO(String groupName, Long creatorId) {
     this.groupName = groupName;
     this.creatorId = creatorId;
   }
 
-  public static RequestTravelGroupDTO createRequestTravelGroupDTO(String groupName, long creatorId) {
+  public static RequestTravelGroupDTO createRequestTravelGroupDTO(String groupName, Long creatorId) {
     return new RequestTravelGroupDTO(groupName, creatorId);
   }
 
   // DTO를 Entity로 변환
-  public TravelGroup toEntity(final User creator, final String inviteCode, final Instant createdAt) {
+  public TravelGroup toEntity(final User creator, final String inviteCode) {
     return new TravelGroup(
-        this.groupName,
-        creator,
-        inviteCode,
-        createdAt
+            this.groupName,
+            creator,
+            inviteCode
     );
   }
 }

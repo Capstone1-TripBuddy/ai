@@ -43,14 +43,14 @@ public class AlbumController {
   // 파일 업로드
   @PostMapping("/upload")
   public ResponseEntity<Void> uploadPhotos(@ModelAttribute RequestPhotoDTO requestPhotoDTO)
-      throws IOException {
+          throws IOException {
     fileService.storeFiles(requestPhotoDTO);
     return new ResponseEntity<>(HttpStatus.OK);
   }
 
   // 파일 삭제
-  @DeleteMapping("/delete")
-  public ResponseEntity<Void> deletePhoto(@RequestParam("filePath") String filePath) {
+  @DeleteMapping("/delete/{filePath}")
+  public ResponseEntity<Void> deletePhoto(@PathVariable String filePath) {
     if (!fileService.doesFileExist(filePath)) {
       return new ResponseEntity<>(HttpStatus.NOT_FOUND);
     }
@@ -61,22 +61,24 @@ public class AlbumController {
   @GetMapping("/{groupId}")
   public ResponseEntity<List<ResponseAlbumDTO>> getAllAlbumData(@PathVariable Long groupId) {
     List<ResponseAlbumDTO> albums = albumService.findAllAlbums(groupId);
+    if (albums.isEmpty()) {
+      return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+    }
     return new ResponseEntity<>(albums, HttpStatus.OK);
   }
 
-  //수정 필요
   @GetMapping("/{groupId}/{albumName}")
   public ResponseEntity<List<ResponsePhotoDTO>> getAlbumData(@PathVariable Long groupId, @PathVariable String albumName) {
     Optional<List<ResponsePhotoDTO>> albumPhotos =
-        albumService.findAllAlbumPhotos(new RequestAlbumDTO(groupId, albumName));
+            albumService.findAllAlbumPhotos(new RequestAlbumDTO(groupId, albumName));
     return albumPhotos.map(
-            responsePhotoDTOS -> new ResponseEntity<>(responsePhotoDTOS, HttpStatus.OK))
-        .orElseGet(() -> new ResponseEntity<>(HttpStatus.NOT_FOUND));
+                    responsePhotoDTOS -> new ResponseEntity<>(responsePhotoDTOS, HttpStatus.OK))
+            .orElseGet(() -> new ResponseEntity<>(HttpStatus.NOT_FOUND));
   }
 
-  @PostMapping("/{groupId}/{albumName}/download")
+  @GetMapping("/{groupId}/{albumName}/download")
   public ResponseEntity<ByteArrayResource> downloadAllAlbumPhotos(@PathVariable Long groupId, @PathVariable String albumName)
-      throws IOException {
+          throws IOException {
     Optional<ResponseEntity<ByteArrayResource>> response = albumService.zipAlbum(new RequestAlbumDTO(groupId, albumName));
     return response.orElseGet(() -> new ResponseEntity<>(HttpStatus.NOT_FOUND));
   }

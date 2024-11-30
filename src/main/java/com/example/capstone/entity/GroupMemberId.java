@@ -3,10 +3,13 @@ package com.example.capstone.entity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Embeddable;
 import java.util.Objects;
+import lombok.AccessLevel;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.hibernate.Hibernate;
 
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 @Getter
 @Setter
 @Embeddable
@@ -29,7 +32,12 @@ public class GroupMemberId implements java.io.Serializable {
     }
     GroupMemberId entity = (GroupMemberId) o;
     return Objects.equals(this.groupId, entity.groupId) &&
-        Objects.equals(this.userId, entity.userId);
+            Objects.equals(this.userId, entity.userId);
+  }
+
+  GroupMemberId(final Long groupId, final Long userId) {
+    this.groupId = groupId;
+    this.userId = userId;
   }
 
   @Override

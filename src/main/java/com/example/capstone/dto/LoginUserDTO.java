@@ -23,8 +23,8 @@ public class LoginUserDTO {
   // Entity를 DTO로 변환
   public static LoginUserDTO fromEntity(User user) {
     return new LoginUserDTO(
-        user.getEmail(),
-        user.getPassword()
+            user.getEmail(),
+            user.getPassword()
     );
   }
 

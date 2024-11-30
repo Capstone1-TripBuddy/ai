@@ -7,12 +7,16 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 import org.hibernate.annotations.ColumnDefault;
+import org.hibernate.annotations.DynamicInsert;
 
+@DynamicInsert
 @AllArgsConstructor
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @Getter
@@ -33,13 +37,17 @@ public class User {
   @Column(name = "name", nullable = false)
   private String name;
 
+  @Setter
   @Column(name = "profile_picture")
   private String profilePicture;
 
   @ColumnDefault("CURRENT_TIMESTAMP")
   @Column(name = "created_at")
-  private Instant createdAt;
+  private LocalDateTime createdAt;
 
-  public User(final String email, final String password, final String name, final Instant createdAt) {
+  public User(final String email, final String password, final String name) {
+    this.email = email;
+    this.password = password;
+    this.name = name;
   }
 }

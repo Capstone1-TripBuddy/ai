@@ -1,5 +1,6 @@
 package com.example.capstone.service;
 
+import com.amazonaws.services.s3.model.ExistingObjectReplication;
 import com.example.capstone.dto.RequestGroupMemberDTO;
 import com.example.capstone.dto.RequestTravelGroupDTO;
 import com.example.capstone.dto.ResponseTravelGroupDTO;
@@ -9,7 +10,10 @@ import com.example.capstone.entity.User;
 import com.example.capstone.repository.GroupMemberRepository;
 import com.example.capstone.repository.TravelGroupRepository;
 import com.example.capstone.repository.UserRepository;
+import jakarta.persistence.EntityExistsException;
+import jakarta.persistence.EntityNotFoundException;
 import java.time.Instant;
+import java.util.Objects;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -38,27 +42,43 @@ public class TravelGroupService {
       return Optional.empty();
     }
 
+    // UNIQUE KEY (userId, groupName)
+    List<TravelGroup> existingGroups = travelGroupRepository.findAll().stream()
+            .filter((group) -> group.getCreator().equals(creator.get()))
+            .filter((group) -> Objects.equals(group.getGroupName(), travelGroup.getGroupName())).toList();
+    if (!existingGroups.isEmpty()) {
+      throw new EntityExistsException();
+    }
+
     TravelGroup createdGroup = travelGroup.toEntity(
-        creator.get(),
-        this.generateInviteCode(10),
-        Instant.now()
+            creator.get(),
+            this.generateInviteCode(10)
     );
     TravelGroup result = travelGroupRepository.save(createdGroup);
 
     return Optional.of(ResponseTravelGroupDTO.fromEntity(result));
   }
 
-  // Get travel group by ID
-  public Optional<ResponseTravelGroupDTO> getGroupById(Long id) {
-    TravelGroup foundGroup = travelGroupRepository.findById(id).get();
-    return Optional.of(ResponseTravelGroupDTO.fromEntity(foundGroup));
-  }
-
   // Get all travel groups
   public List<ResponseTravelGroupDTO> getAllGroups() {
     return travelGroupRepository.findAll().stream()
-        .map(ResponseTravelGroupDTO::fromEntity)
-        .collect(Collectors.toList());
+            .map(ResponseTravelGroupDTO::fromEntity)
+            .collect(Collectors.toList());
+  }
+
+  // Get all travel members
+  public List<ResponseTravelGroupDTO> getAllGroups(Long groupId) {
+    travelGroupRepository.findById(groupId).ifPresent(travelGroup -> {
+
+    });
+    List<GroupMember> groupMembers = groupMemberRepository.findByGroupId(groupId);
+    if (groupMembers.isEmpty()) {
+      throw new EntityNotFoundException("getAllGroups: can't find any group member");
+    }
+
+    return travelGroupRepository.findAll().stream()
+            .map(ResponseTravelGroupDTO::fromEntity)
+            .collect(Collectors.toList());
   }
 
   // Join travel group by invite code
@@ -67,7 +87,7 @@ public class TravelGroupService {
     Optional<User> user = userRepository.findById(groupMemberDTO.getUserId());
 
     if (travelGroup.isPresent() && user.isPresent()) {
-      GroupMember createdGroupMember = RequestGroupMemberDTO.toEntity(travelGroup.get(), user.get());
+      GroupMember createdGroupMember = new GroupMember(travelGroup.get(), user.get());
       groupMemberRepository.save(createdGroupMember);
 
       return Optional.of(ResponseTravelGroupDTO.fromEntity(travelGroup.get()));

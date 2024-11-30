@@ -1,6 +1,7 @@
 package com.example.capstone.dto;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -14,6 +15,6 @@ public class ResponsePhotoDTO {
   private String fileName;
   private String fileUrl;
   private Long imageSize;
-  private Instant uploadDate;
+  private LocalDateTime uploadDate;
 
 }
