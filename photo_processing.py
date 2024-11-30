@@ -139,7 +139,7 @@ def compress_image_base64(image_path: str, max_size_kb: int = 80, initial_qualit
                 break
 
             quality //= 2  # 품질 점진적으로 감소
-        print(f'Q: {quality}, S: {size_kb}')
+        print(f'Quality(Percentage): {quality}, Size(KB): {size_kb}')
 
         # Base64로 인코딩
         buffer.seek(0)
@@ -205,9 +205,9 @@ def get_categories(photos_path: list[str]) -> list[str]:
         # ChatGPT에 이미지 분석 요청
         # Prompt 준비
         prompt = (
-            "이미지를 분석하고, 이미지의 주제를 PERSON, NATURE, CITY, FOOD, OBJECT, ANIMAL, 또는 OTHERS 중 하나로 한 대문자 영단어로 분류해 주세요. "
-            "인물이면 PERSON, 자연경관이면 NATURE, 도시이면 CITY, 음식이면 FOOD, 물건이면 OBJECT, 동물이면 ANIMAL, 그 외의 주제들은 OTHERS를 고르면 됩니다. "
-            "너무 모호하면 (예를 들어 50%가 인물이 주제인 것 같고 50%는 자연경관이 주제인 것 같으면) 여러 개 선택하면 됩니다."
+            "이미지를 분석하고, 이미지의 주제를 PERSON, SIGHT, FOOD, ANIMAL, 또는 OTHERS 중 하나로 한 대문자 영단어로 분류해 주세요. "
+            "인물이면 PERSON, 자연이나 도시 등의 풍경이면 SIGHT, 음식이면 FOOD, 동물이면 ANIMAL, 그 외의 주제들은 OTHERS를 고르면 됩니다. "
+            "너무 모호하면 (예를 들어 50%가 인물이 주제인 것 같고 50%는 풍경이 주제인 것 같으면) 여러 개 선택하면 됩니다."
             "여러 개 선택할 때는 각각을 쉼표로 구분하고, 공백은 없어야 합니다."
             "이미지는 Base64로 인코딩된 데이터로 제공됩니다."
         )
@@ -243,6 +243,46 @@ def get_categories_parallel(photo_paths: list[str]):
     with concurrent.futures.ThreadPoolExecutor() as executor:
         results = list(executor.map(get_category, photo_paths))
     return results
+
+def get_questions(photo_path: str) -> str:
+    #t = time.time()
+    base64_image = compress_image_base64(photo_path)
+    #print('COMPRESSING TIME:', time.time() - t)
+    img_type = 'image/jpeg'
+
+    # ChatGPT에 이미지 분석 요청
+    # Prompt 준비
+    prompt = (
+        "주어진 이미지와 관련하여 내가 추억을 떠올릴 수 있을만한 질문을 많이 생성해주세요."
+        "다른 문장도 필요 없고 오로지 질문 리스트만 나열해주세요. 항목 번호도 필요 없습니다."
+        "각 질문은 개행으로만 구분해주세요."
+        "이미지는 Base64로 인코딩된 데이터로 제공됩니다."
+    )
+    content = [
+        {"type": "text", "text": prompt},
+        {
+            "type": "image_url",
+            "image_url": {"url": f"data:{img_type};base64,{base64_image}"},
+        },
+    ]
+
+    try:
+        # ChatGPT 모델에 요청
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are an assistant specializing in image classification."},
+                {"role": "user", "content": content},
+            ],
+        )
+        # 결과 가져오기
+        answer = response.choices[0].message.content
+        print(answer)
+        answer = [x.strip() for x in answer.split('\n') if x.strip()]
+        return answer
+
+    except Exception as e:
+        return ValueError(f"Error during API call: {e}")
 
 from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.encoders import jsonable_encoder
@@ -403,11 +443,11 @@ async def process_photos_faces(
                     face_list.append(PhotoFaceData(item))
             form.append(face_list)
         return form
-    
+
     except Exception as e:
         print(e)
         return {"error": f'{e}'}
-    
+
     finally:
         # 임시 파일 삭제
         temp_files = temp_files_profile + temp_files_photos
@@ -429,7 +469,7 @@ async def process_photos_category(
     try:
         # 문자열로 받은 photo_paths를 리스트로 변환
         photo_paths = eval(photo_paths)
-        
+
         # 변환된 경로를 저장할 리스트
         processed_paths, temp_files = process_paths(photo_paths)
 
@@ -437,7 +477,7 @@ async def process_photos_category(
         result = get_categories_parallel(processed_paths)
 
         return result
-    
+
     except Exception as e:
         print(e)
         return {"error": f'{e}'}
@@ -446,6 +486,32 @@ async def process_photos_category(
         for temp_file_path in temp_files:
             if os.path.exists(temp_file_path):
                 os.remove(temp_file_path)
+        t = time.time() - t
+        print(f'PROCESS TIME: {t}')
+
+@app.post("/process_photos/questions")
+async def process_photos_questions(image: UploadFile = File(...)):
+    t = time.time()
+    temp_file_path = None  # 임시 파일 경로 저장
+    try:
+        # 업로드된 이미지를 임시 파일로 저장
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
+            temp_file_path = temp_file.name
+            temp_file.write(await image.read())
+
+        # get_questions 호출
+        faces_data = get_questions(temp_file_path)
+
+        # 결과를 포맷팅하여 반환
+        form = faces_data
+        return form
+    except Exception as e:
+        print(e)
+        return {"error": f'{e}'}
+    finally:
+        # 임시 파일 삭제
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
         t = time.time() - t
         print(f'PROCESS TIME: {t}')
 

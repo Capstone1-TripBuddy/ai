@@ -15,10 +15,8 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.NoSuchElementException;
+import java.time.LocalDateTime;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Async
@@ -28,10 +26,20 @@ public class PhotoAnalysisService {
     private final TravelGroupRepository travelGroupRepository;
     private final GroupMemberRepository groupMemberRepository;
     private final PhotoRepository photoRepository;
-    private final FaceRepository faceRepository;
-    private final UserFaceRepository userFaceRepository;
+    private final AlbumRepository albumRepository;
+    private final AlbumPhotoRepository albumPhotoRepository;
     private final ConcurrentHashMap<Long, Object> lockMap = new ConcurrentHashMap<>();
     private final String pythonServerUrl = "http://127.0.0.1:8000/process_photos/";
+
+    public static HashMap<String, String> map;
+    static {
+        map = new HashMap<>();
+        map.put("NATURE", "자연");
+        map.put("CITY", "도시");
+        map.put("FOOD", "음식");
+        map.put("OBJECT", "물건");
+        map.put("ANIMAL", "동물");
+    }
 
     // groupId에 해당하는 Lock 객체 가져오기
     private Object getLock(Long groupId) {
@@ -47,8 +55,14 @@ public class PhotoAnalysisService {
         });
     }
 
+    /**
+     * 프로필 사진이 이용하기 적절한지 판단한다.
+     * 프로필 사진 속에는 얼굴이 하나만 있어야 한다.
+     * @param file 사진 파일
+     * @return 사진 속 얼굴 수
+     */
     @Async
-    public boolean isValidProfileImage(MultipartFile file) {
+    public int isValidProfileImage(MultipartFile file) throws IOException {
         try {
             // Convert MultipartFile to byte array
             byte[] fileBytes = file.getBytes();
@@ -58,6 +72,7 @@ public class PhotoAnalysisService {
             headers.setContentType(MediaType.MULTIPART_FORM_DATA);
 
             // Create request entity
+            RestTemplate restTemplate = new RestTemplate();
             HttpEntity<byte[]> requestEntity = new HttpEntity<>(fileBytes, headers);
 
             // Send POST request and receive response as PhotoFaceDto[]
@@ -70,19 +85,23 @@ public class PhotoAnalysisService {
 
             // Check response status
             if (response.getStatusCode() != HttpStatus.OK || response.getBody() == null) {
-                return false;
+                throw new RuntimeException("Response Error");
             }
 
             // Validate profile image based on face detection
             PhotoFaceDto[] faceData = response.getBody();
-            return faceData.length == 1; // Example: valid if at least one face is detected
+            return faceData.length;
 
         } catch (IOException | IllegalStateException e) {
             e.printStackTrace();
-            return false;
+            throw e;
         }
     }
 
+    /**
+     * 사진들의 카테고리를 판단하여 앨범에 추가한다.
+     * @param groupId 분석할 사진들이 속한 여행 그룹 ID
+     */
     @Async
     @Transactional
     public void processImagesTypes(long groupId) {
@@ -118,9 +137,36 @@ public class PhotoAnalysisService {
                 String[] categories = response.getBody();
 
                 for (int i = 0, l = categories == null ? 0 : categories.length; i < l; i++) {
-                    newPhotoList.get(i).setPhotoType(categories[i]);
+                    Photo photo = newPhotoList.get(i);
+                    photo.setPhotoType(categories[i]);
+                    photoRepository.save(photo);
+                    String categoriesString = categories[i];
+
+                    // 하나의 사진도 여러 개의 카테고리를 가질 수 있으며, 쉼표로 구분됨
+                    // PERSON, NATURE, CITY, FOOD, OBJECT, ANIMAL, OTHERS 에서 선택됨
+                    // PERSON은 processImagesFaces()에서 처리하면 되고
+                    // OTHERS는 기타이므로 무시하면 됨(?)
+                    String[] ts = categoriesString.split(",");
+                    for (String t : ts) {
+                        if (Objects.equals(t, "NATURE") || Objects.equals(t, "CITY")
+                                || Objects.equals(t, "FOOD") || Objects.equals(t, "OBJECT")
+                                || Objects.equals(t, "ANIMAL")) {
+                            String title = map.get(t);
+                            Optional<Album> albumOptional = albumRepository.findByGroupAndTitle(group, title);
+                            if (albumOptional.isEmpty()) {
+                                Album album = new Album(group, title, null);
+                                albumRepository.save(album);
+                                AlbumPhoto albumPhoto = new AlbumPhoto(album, photo);
+                                albumPhotoRepository.save(albumPhoto);
+                            }
+                            else {
+                                Album album = albumOptional.get();
+                                AlbumPhoto albumPhoto = new AlbumPhoto(album, photo);
+                                albumPhotoRepository.save(albumPhoto);
+                            }
+                        }
+                    }
                 }
-                photoRepository.saveAll(newPhotoList);
             } finally {
                 // 필요에 따라 Lock 객체를 제거 (메모리 관리)
                 removeLockIfUnused(groupId, lock);
@@ -128,9 +174,16 @@ public class PhotoAnalysisService {
         }
     }
 
+    /**
+     * 사진들 속 얼굴들을 인식하여 앨범에 추가한다.
+     * 그룹 구성원이 새로 추가되지 않은 상태에서 사진들만 새로 추가되어 그 사진들만 분석할 경우는 processAllPhotos를 false로 한다.
+     * 새로운 그룹이거나 새로운 그룹원이 있을 경우 processAllPhotos를 true로 한다.
+     * @param groupId 분석할 사진들이 속한 여행 그룹 ID
+     * @param processAllPhotos 그룹 내 전체 사진들에 대해 조사할 것인지 여부
+     */
     @Async
     @Transactional
-    public void processImagesFaces(long groupId) {
+    public void processImagesFaces(long groupId, boolean processAllPhotos) {
         TravelGroup group = travelGroupRepository.findById(groupId).orElseThrow(
                 () -> new NoSuchElementException("Travel group not found")
         );
@@ -139,18 +192,20 @@ public class PhotoAnalysisService {
         synchronized (lock) {
             try {
                 // 현재 Group의 얼굴 데이터를 가져오기
-                List<Face> oldFaceList = faceRepository.findAllByPhotoGroup(group);
-                List<Face> newFaceList = new ArrayList<>();
-                List<UserFace> newUserFaceList = new ArrayList<>();
-                List<Photo> oldPhotoList = photoRepository.findAllByGroupAndAnalyzedAtIsNotNull(group);
-                List<Photo> newPhotoList = photoRepository.findAllByGroupAndAnalyzedAtIsNull(group);
-                List<String> newPhotoPaths = new ArrayList<>();
+                List<Photo> photoList;
+                if (processAllPhotos) {
+                    photoList = photoRepository.findAllByGroup(group);
+                }
+                else{
+                    photoList = photoRepository.findAllByGroupAndAnalyzedAtIsNull(group);
+                }
+                List<String> photoPaths = new ArrayList<>();
                 List<GroupMember> groupMemberList = groupMemberRepository.findAllByGroup(group);
                 List<String> groupMemberProfilePics = new ArrayList<>();
                 List<String> groupMemberNames = new ArrayList<>();
 
-                for (Photo photo : newPhotoList) {
-                    newPhotoPaths.add(photo.getFilePath());
+                for (Photo photo : photoList) {
+                    photoPaths.add(photo.getFilePath());
                 }
 
                 for (int i = 0; i < groupMemberList.size(); ++i) {
@@ -165,7 +220,7 @@ public class PhotoAnalysisService {
                 MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
                 body.add("profile_image_paths", groupMemberProfilePics);
                 body.add("profile_names", groupMemberNames);
-                body.add("photo_paths", newPhotoPaths);
+                body.add("photo_paths", photoPaths);
                 //body.add("embedding_ids", embeddingIds.stream().map(String::valueOf).collect(Collectors.joining(",")));
 
                 HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
@@ -181,24 +236,33 @@ public class PhotoAnalysisService {
                 PhotoFaceDto[][] photosData = response.getBody();
 
                 for (int i = 0, lp = photosData == null ? 0 : photosData.length; i < lp; i++) {
-                    Photo photo = newPhotoList.get(i);
                     PhotoFaceDto[] facesData = photosData[i];
+                    Photo photo = photoList.get(i);
                     photo.setHasFace(facesData != null && facesData.length > 0);
-                    photo.setAnalyzedAt(Instant.now());
+                    photo.setAnalyzedAt(LocalDateTime.now());
                     photoRepository.save(photo);
                     for (int j = 0, lf = facesData == null ? 0 : facesData.length; j < lf; j++) {
                         PhotoFaceDto faceData = facesData[j];
                         if (faceData.getLabel() != null) {
-                            String boundingBox = String.format(
-                                    "%d,%d,%d,%d",
-                                    faceData.getX(), faceData.getY(), faceData.getW(), faceData.getH()
-                            );
-                            Face face = new Face(photo, boundingBox);
-                            faceRepository.save(face);
-
                             int idx = Integer.getInteger(faceData.getLabel());
                             User user = groupMemberList.get(idx).getUser();
-                            userFaceRepository.save(new UserFace(user, face));
+
+                            String title = user.getName();
+                            Optional<Album> albumOptional = albumRepository.findByGroupAndTitle(group, title);
+                            if (albumOptional.isPresent()) {
+                                // 기존에 분석된 적이 있는 이용자 얼굴임
+                                Album album = albumOptional.get();
+                                if (!albumPhotoRepository.existsByAlbumAndPhoto(album, photo)) {
+                                    // 새로 추가된 사진에서 기존 이용자 얼굴이 인식됨
+                                    albumPhotoRepository.save(new AlbumPhoto(album, photo));
+                                }
+                            }
+                            else {
+                                // 처음으로 얼굴 인식을 시도함 또는 사진에서 새롭게 추가된 이용자 얼굴이 인식됨
+                                Album album = new Album(group, title, null);
+                                albumRepository.save(album);
+                                albumPhotoRepository.save(new AlbumPhoto(album, photo));
+                            }
                         }
                     }
                 }
