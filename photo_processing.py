@@ -164,11 +164,11 @@ def get_category(photo_path: str) -> str:
     # ChatGPT에 이미지 분석 요청
     # Prompt 준비
     prompt = (
-        "이미지를 분석하고, 이미지의 주제를 PERSON, NATURE, CITY, FOOD, OBJECT, ANIMAL, 또는 OTHERS 중 하나로 한 대문자 영단어로 분류해 주세요. "
-        "인물이면 PERSON, 자연경관이면 NATURE, 도시이면 CITY, 음식이면 FOOD, 물건이면 OBJECT, 동물이면 ANIMAL, 그 외의 주제들은 OTHERS를 고르면 됩니다. "
-        "너무 모호하면 (예를 들어 50%가 인물이 주제인 것 같고 50%는 자연경관이 주제인 것 같으면) 여러 개 선택하면 됩니다."
-        "여러 개 선택할 때는 각각을 쉼표로 구분하고, 공백은 없어야 합니다."
-        "이미지는 Base64로 인코딩된 데이터로 제공됩니다."
+            "이미지를 분석하고, 이미지의 주제를 PERSON, SIGHT, FOOD, ANIMAL, 또는 OTHERS 중 하나로 한 대문자 영단어로 분류해 주세요. "
+            "인물이면 PERSON, 자연이나 도시 등의 풍경이면 SIGHT, 음식이면 FOOD, 동물이면 ANIMAL, 그 외의 주제들은 OTHERS를 고르면 됩니다. "
+            "너무 모호하면 (예를 들어 50%가 인물이 주제인 것 같고 50%는 풍경이 주제인 것 같으면) 여러 개 선택하면 됩니다."
+            "여러 개 선택할 때는 각각을 쉼표로 구분하고, 공백은 없어야 합니다."
+            "이미지는 Base64로 인코딩된 데이터로 제공됩니다."
     )
     content = [
         {"type": "text", "text": prompt},
@@ -481,6 +481,7 @@ async def process_photos_category(
 
         # get_categories 함수에 변환된 경로 전달
         result = get_categories_parallel(processed_paths)
+        print(result)
 
         return result
 
