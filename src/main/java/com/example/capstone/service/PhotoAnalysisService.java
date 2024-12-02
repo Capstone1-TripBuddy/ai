@@ -41,7 +41,8 @@ public class PhotoAnalysisService {
     public static HashMap<String, String> map;
     static {
         map = new HashMap<>();
-        map.put("SIGHT", "풍경");
+        map.put("NATURE", "자연");
+        map.put("CITY", "도시");
         map.put("FOOD", "음식");
         map.put("ANIMAL", "동물");
     }
@@ -155,13 +156,13 @@ public class PhotoAnalysisService {
                     String categoriesString = categories[i];
 
                     // 하나의 사진도 여러 개의 카테고리를 가질 수 있으며, 쉼표로 구분됨
-                    // PERSON, SIGHT, FOOD, OBJECT, ANIMAL, OTHERS 에서 선택됨
+                    // PERSON, NATURE, CITY, FOOD, ANIMAL, OTHERS 에서 선택됨
                     // PERSON은 processImagesFaces()에서 처리하면 되고
-                    // OTHERS는 기타이므로 무시하면 됨(?)
+                    // OTHERS는 기타이므로 무시하면 됨
                     String[] ts = categoriesString.split(",");
                     for (String t : ts) {
-                        if (Objects.equals(t, "SIGHT") || Objects.equals(t, "FOOD")
-                                || Objects.equals(t, "OBJECT") || Objects.equals(t, "ANIMAL")) {
+                        if (Objects.equals(t, "NATURE") || Objects.equals(t, "CITY")
+                                || Objects.equals(t, "FOOD") || Objects.equals(t, "ANIMAL")) {
                             String title = map.get(t);
                             Optional<Album> albumOptional = albumRepository.findByGroupAndTitle(group, title);
                             if (albumOptional.isEmpty()) {
@@ -233,7 +234,6 @@ public class PhotoAnalysisService {
                 body.add("profile_image_paths", groupMemberProfilePics);
                 body.add("profile_names", groupMemberNames);
                 body.add("photo_paths", photoPaths);
-                //body.add("embedding_ids", embeddingIds.stream().map(String::valueOf).collect(Collectors.joining(",")));
 
                 HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
 

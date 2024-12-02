@@ -1,6 +1,5 @@
 package com.example.capstone;
 
-import com.example.capstone.entity.User;
 import com.example.capstone.repository.GroupMemberRepository;
 import com.example.capstone.repository.PhotoRepository;
 import com.example.capstone.repository.TravelGroupRepository;
@@ -15,7 +14,6 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 
 @SpringBootTest
