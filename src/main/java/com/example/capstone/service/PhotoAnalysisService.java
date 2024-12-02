@@ -1,9 +1,14 @@
 package com.example.capstone.service;
 
-import com.example.capstone.dto.PhotoAnalysisDto;
 import com.example.capstone.dto.PhotoFaceDto;
 import com.example.capstone.entity.*;
 import com.example.capstone.repository.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.NoSuchElementException;
+import java.util.Objects;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.*;
@@ -17,8 +22,6 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.time.Instant;
-import java.time.LocalDateTime;
-import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Async
@@ -30,9 +33,10 @@ public class PhotoAnalysisService {
     private final PhotoRepository photoRepository;
     private final AlbumRepository albumRepository;
     private final AlbumPhotoRepository albumPhotoRepository;
-    private final ConcurrentHashMap<Long, Object> lockMap = new ConcurrentHashMap<>();
     private final String pythonServerUrl = "http://127.0.0.1:8000/";
     private final String dataServerRootUrl = "https://photo-bucket-012.s3.ap-northeast-2.amazonaws.com/";
+    
+    private static ConcurrentHashMap<Long, Object> lockMap = new ConcurrentHashMap<>();
 
     public static HashMap<String, String> map;
     static {
@@ -252,7 +256,7 @@ public class PhotoAnalysisService {
                     for (int j = 0, lf = facesData == null ? 0 : facesData.length; j < lf; j++) {
                         PhotoFaceDto faceData = facesData[j];
                         if (faceData.getLabel() != null) {
-                            int idx = Integer.getInteger(faceData.getLabel());
+                            int idx = Integer.parseInt(faceData.getLabel());
                             User user = groupMemberList.get(idx).getUser();
 
                             String title = user.getName();
@@ -277,6 +281,13 @@ public class PhotoAnalysisService {
             } finally {
                 // 필요에 따라 Lock 객체를 제거 (메모리 관리)
                 removeLockIfUnused(groupId, lock);
+                
+        // TODO:  upload (분류 완료) 내역 남김
+        /*
+        Long lastPhotoId = photoList.get(result.size() - 1);
+        groupPhotoActivityService.addActivity(request.getGroupId(), request.getUserId(), lastPhotoId,
+            "upload");
+         */
             }
         }
     }
