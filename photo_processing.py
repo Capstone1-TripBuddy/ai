@@ -126,6 +126,7 @@ def compress_image_base64(image_path: str, max_size_kb: int = 80, initial_qualit
     try:
         # 이미지 열기
         img = Image.open(image_path)
+        img = img.convert('RGB')
 
         # 압축 품질 조정
         quality = initial_quality
