@@ -288,6 +288,11 @@ def get_questions(photo_path: str) -> str:
     except Exception as e:
         return ValueError(f"Error during API call: {e}")
 
+def get_questions_parallel(photo_paths: list[str]) -> list[list]:
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        results = list(executor.map(get_questions, photo_paths))
+    return results
+
 from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.encoders import jsonable_encoder
 from typing import List
@@ -520,6 +525,35 @@ async def process_photos_questions(image: UploadFile = File(...)):
         # 임시 파일 삭제
         if temp_file_path and os.path.exists(temp_file_path):
             os.remove(temp_file_path)
+        t = time.time() - t
+        print(f'PROCESS TIME: {t}')
+
+@app.post('/process_photos/questions-list")
+async def process_photos_questions(
+        photo_paths: str = Form(),
+):
+    t = time.time()
+    try:
+        # 문자열로 받은 photo_paths를 리스트로 변환
+        photo_paths = eval(photo_paths)
+
+        # 변환된 경로를 저장할 리스트
+        processed_paths, temp_files = process_paths(photo_paths)
+
+        # get_categories 함수에 변환된 경로 전달
+        result = get_questions_parallel(processed_paths)
+        print(result)
+
+        return result
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return {"error": e}
+    finally:
+        # 처리 중 생성된 임시 파일 삭제
+        for temp_file_path in temp_files:
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
         t = time.time() - t
         print(f'PROCESS TIME: {t}')
 
