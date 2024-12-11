@@ -1,12 +1,15 @@
-import photo_processing
+from photo_processing import get_new_faces, get_categories, get_questions, PhotoFaceData
 
 from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.encoders import jsonable_encoder
+from PIL import Image
 from typing import List
 import uvicorn
 import requests
 import tempfile
+import time
 from urllib.parse import urlparse
+import traceback
 
 photo_processing.get_new_faces([], [], [], False)
 
